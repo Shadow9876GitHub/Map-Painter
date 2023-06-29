@@ -33,6 +33,9 @@ NORM=1 if os.path.exists(f'{ROOT}map.png') else -10000
 if NORM<0: ROOT='/'.join(filedialog.askopenfilename().replace("\\","/").split("/")[:-1])+"/"
 NORM=1 if os.path.exists(f'{ROOT}map.png') else -10000
 if NORM<0: raise Exception(f'{ROOT}map.png was not found! Perhaps the specified file is in another directory...')
+if not os.path.exists(f'app_data.data'):
+    with open(f"app_data.data","w") as file:
+        file.write("")
 SUB=2 if os.path.exists(f'{ROOT}subregions.png') else -10000
 REG=3 if os.path.exists(f'{ROOT}regions.png') else -10000
 COU=4 if os.path.exists(f'{ROOT}countries.png') else -10000
@@ -138,6 +141,14 @@ root=tkinter.Tk()
 
 root.title("MapPainter.exe")
 root.config(cursor="circle")
+
+#Zoomed state (Maximising window size)
+try:
+    #Linux
+    root.attributes('-zoomed', True)
+except:
+    #Windows
+    root.state('zoomed')
 
 #General widget state information
 selected=[]
@@ -263,6 +274,14 @@ def select_province(event, input_mode=0) -> None:
         display_map(BW if len(selected)!=0 else displayed_map)
     elif input_mode not in (2,3):
         display_map(displayed_map)
+
+def select_neighbours(event) -> None:
+    global selected
+    if len(selected)==0: return
+    selected=list(set(selected).union(*[provinces[i].neighbours for i in selected]))
+    update_provinces_map()
+    display_map(BW)
+    show_information(selected[-1],False)
 
 def show_information(ind: int, is_country: bool) -> None:
     global c_information_len
@@ -492,8 +511,7 @@ BW_new=True
 def update_provinces_map() -> None:
     global BW_new
     img=np.copy(base[BW])
-    fill=set().union(*[provinces[i].neighbours for i in selected])
-    fill=fill.difference(set(selected))
+    fill=set().union(*[provinces[i].neighbours for i in selected]).difference(set(selected))
     for i in fill:
         cv2.floodFill(img,None,provinces[i].pos,(0,0,0),flags=8|(255<<8))
     images[BW]=create_image(img)
@@ -629,7 +647,11 @@ def scripting_line(current: str) -> None:
         if abbr[:4]=="cont": attr="continent"
         return attr
 
-    if current.lower()[0]=="c":
+    if current.lower()[0]=="z" or current.lower()=="undo":
+        undo(None)
+    elif current.lower()[0]=="y" or current.lower()=="redo":
+        redo(None)
+    elif current.lower()[0]=="c":
         #Syntax: (c col #FFFFFF) or (change colour #FFFFFF); c - colour, s - subregion, r - region, n - neighbours, o - overlord, ci - civil_war, t - tag_name
         attr=get_attribute(current.lower().split(" ")[1])
         if attr=="connection":
@@ -691,7 +713,7 @@ def standard_output(message: str) -> None:
 
 #Moving the map
 def move(event) -> None:
-    if is_additive: return
+    if is_additive or 0<additive_val<5: return
     global move_center
 
     def slide_map(vector: (int,int)) -> None:
@@ -717,8 +739,30 @@ def clear_move_center(event) -> None:
 zoom_cursor_position=(0,0)
 last_point_position=(0,0)
 
+def update_displayed_map(from_zoom=False) -> None:
+    images[displayed_map]=create_image(base[displayed_map])
+    display_map(displayed_map,from_zoom)
+
+def increase_zoom(event) -> None:
+    global scale
+    scale+=0.5
+    scale=sorted([round(scale,2),0.1,50])[1]
+    update_displayed_map(True)
+
+def decrease_zoom(event) -> None:
+    global scale
+    scale-=0.5
+    scale=sorted([round(scale,2),0.1,50])[1]
+    update_displayed_map(True)
+
+def reset_zoom(event) -> None:
+    global scale,map_position
+    scale=1
+    map_position=(0,0)
+    update_displayed_map(True)
+
 def zoom(event) -> None:
-    if is_additive: return
+    if is_additive or 0<additive_val<5: return
     global scale, map_position, last_point_position, zoom_cursor_position
     #print(f"{event.x},{event.y},{event.num},{event.delta}")
     #last_point_position should be constant
@@ -731,8 +775,7 @@ def zoom(event) -> None:
     else:
         zoom_cursor_position=(event.y,event.x)
         last_point_position=(int((map_position[0]+event.y)/scale),int((map_position[1]+event.x)/scale))
-    images[displayed_map]=create_image(base[displayed_map])
-    display_map(displayed_map,True)
+    update_displayed_map(True)
 
 def change_export_function():
     global quick_export
@@ -746,7 +789,6 @@ def remember_quick_export():
         if not is_last_linebreak:
             file.write("\n")
         file.write("quick_export\n")
-
 
 quick_export=False
 
@@ -813,24 +855,23 @@ export_button.grid(row=len(attributes)+3,column=1)
 error_message=tkinter.Label(root,bg="#FF7F7F",relief=tkinter.SOLID,borderwidth=2)
 
 #Safety mechanism preventing the loss of large selections
-is_additive=0
+is_additive=False
+additive_val=0
 def additive_pressed(event) -> None:
-    global is_additive
-    is_additive+=1
+    global is_additive,additive_val
+    additive_val+=1
+    is_additive=True
 
 def additive_released(event) -> None:
-    global is_additive
-    if 0<is_additive<5:
-        is_additive-=1
-    else:
-        is_additive=0
+    global is_additive,additive_val
+    additive_val-=1
+    is_additive=False
 
 #Binding functions
 map_label.bind("<B1-Motion>", move) #Moving the map
 map_label.bind("<ButtonRelease-1>",clear_move_center) #Finishing map movement
 map_label.bind("<B2-Motion>", move) #Moving the map
 map_label.bind("<ButtonRelease-2>",clear_move_center) #Finishing map movement
-map_label.bind("<MouseWheel>", zoom)
 #Undo, redo
 map_label.bind("<Control-z>", undo) #Undo
 map_label.bind("<Control-y>", redo) #Redo
@@ -843,11 +884,17 @@ map_label.bind("<Shift_L>",additive_pressed)
 map_label.bind("<KeyRelease-Shift_L>",additive_released)
 map_label.bind("<Shift_R>",additive_pressed)
 map_label.bind("<KeyRelease-Shift_R>",additive_released)
+#Zoom
+map_label.bind("<MouseWheel>", zoom)
+map_label.bind("<Control-plus>",increase_zoom)
+map_label.bind("<Control-minus>",decrease_zoom)
+map_label.bind("<Control-slash>",reset_zoom)
 #Province selection
 map_label.bind("<Button-1>", select_province) #Normal province selection
 map_label.bind("<Control-Button-1>", lambda e: select_province(e,2)) #Additive prov. selection
 map_label.bind("<Shift-Button-1>", lambda e: select_province(e,3)) #Decremental prov. selection
 map_label.bind("<Button-3>", lambda e: select_province(e,1)) #One province at a time selection
+map_label.bind("<Return>", select_neighbours)
 #Map mode selection
 map_label.bind("<p>", lambda e: display_map(BW)) #Black and white map
 map_label.bind("<n>", lambda e: display_map(NORM)) #Normal map
@@ -864,8 +911,11 @@ map_label.bind("<Up>", lambda e: display_map((current_map+1)%len(images)))
 #Shortcut to access information without clicking there
 map_label.bind("<i>", lambda e: information[2][0].focus_set())
 
+def exit_selection(event):
+    display_map(NORM)
+
 #Quality of Life bindings
-root.bind("<Escape>", sys.exit)
+root.bind("<Escape>", exit_selection)
 root.bind_all('<Button>', change_focus)
 
 #Global map information
@@ -876,13 +926,12 @@ output_destination="console"
 generate_countries()
 
 #Fonts and settings
+font_size=11
 with open("app_data.data","r") as file:
     for i in file.read().splitlines():
         if "font_size" in i and "=" in i and i.split("=")[1].isnumeric():
             font_size=int(i.split("=")[1])
             break
-    else:
-        font_size=11
 
 def reload_all_widgets(root):
     for elem in root.winfo_children():
