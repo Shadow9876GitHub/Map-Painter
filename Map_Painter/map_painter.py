@@ -142,12 +142,15 @@ root=tkinter.Tk()
 root.title("MapPainter.exe")
 root.config(cursor="circle")
 
+platform="linux"
+
 #Zoomed state (Maximising window size)
 try:
     #Linux
     root.attributes('-zoomed', True)
 except:
     #Windows
+    platform="windows"
     root.state('zoomed')
 
 #General widget state information
@@ -769,8 +772,14 @@ def zoom(event) -> None:
     #if last_point_position!=(int((map_position[0]+event.y)/scale),int((map_position[1]+event.x)/scale)):
     #   map_position[0]=last_point_position[0]*scale-event.y
     if zoom_cursor_position==(event.y,event.x):
-        scale+=(event.delta//120)/20
+        if platform=="linux":
+            delta=1 if event.num==4 else -1
+            scale+=delta/20
+        elif platform=="windows":
+            scale+=(event.delta//120)/20
         scale=sorted([round(scale,2),0.1,50])[1]
+        while image_size[0]*scale<display_size[0] or image_size[1]<display_size[1]:
+            scale+=0.1
         map_position=(int(last_point_position[0]*scale-event.y),int(last_point_position[1]*scale-event.x))
     else:
         zoom_cursor_position=(event.y,event.x)
@@ -885,7 +894,11 @@ map_label.bind("<KeyRelease-Shift_L>",additive_released)
 map_label.bind("<Shift_R>",additive_pressed)
 map_label.bind("<KeyRelease-Shift_R>",additive_released)
 #Zoom
-map_label.bind("<MouseWheel>", zoom)
+if platform=="linux":
+    map_label.bind("<Button-4>", zoom)
+    map_label.bind("<Button-5>", zoom)
+elif platform=="windows":
+    map_label.bind("<MouseWheel>", zoom)
 map_label.bind("<Control-plus>",increase_zoom)
 map_label.bind("<Control-minus>",decrease_zoom)
 map_label.bind("<Control-slash>",reset_zoom)
